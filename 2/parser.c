@@ -82,6 +82,7 @@ command_append_arg(struct command *cmd, char *arg)
 		assert(cmd->arg_count < cmd->arg_capacity);
 	}
 	cmd->args[++cmd->arg_count] = arg;
+    cmd->args[cmd->arg_count + 1] = NULL;
 }
 
 void
