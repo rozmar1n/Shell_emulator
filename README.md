@@ -1,44 +1,57 @@
-Practical examples and homeworks for "System Programming" course of lectures.
+## Custom Shell (HW2)
 
-The course: https://slides.com/gerold103/decks/sysprog and https://slides.com/gerold103/decks/sysprog_eng
+This repository contains my working solution for homework #2 of the VK System Programming course. The task is no longer described here—instead I document the shell I actually built, how the codebase is structured, and how to run the tooling that lives in this repo.
 
-## Running the tests
+### What is implemented
 
-### Manual
+- **Bash-like parser** (`2/parser.c`): streaming input handling with support for quotes, comments, command separators, and late evaluation. The parser is reused as-is and understands arbitrarily long lines.
+- **Execution engine** (`2/my_solution.c`): spawns pipelines of any depth, wires pipes and stdout redirection (`>`/`>>`) to the last command, and restores original descriptors after each line.
+- **Built-ins**: fully in-process `cd`, `exit`, `pwd`, `true`, `false`, and `echo`. `exit` honors Bash semantics—when executed directly it terminates the shell with the requested code, but inside a pipeline it behaves like a regular stage.
+- **Process lifecycle**: each child PID is tracked in a small queue until waitpid() confirms completion; stdout/stderr from failures is reported via `perror`, and zombie cleanup helpers are in place.
+- **Testing assets**: reproducible scenarios live in `2/tests.txt`, and `checker.py` can run them either one-by-one or in a single long session. There are also parser-focused unit tests (`2/test_parser.py`) and VK All Cups harness scripts under `allcups/`.
 
-The folders with numbers as names contain the homeworks with tests (where they could be written). The students are welcome to build and run the tests manually - they should work in any non-Windows system. Alternatively they can be run in Docker. It is recommended to use the latest ubuntu Docker image for that.
+### Repository layout
 
-In order to check more than just the functional correctness it is encouraged to also check for the memory leaks using `utils/heap_help/`.
+- `2/` — the solution itself: `my_solution.c` (entry point), `parser.[ch]`, build system, tests, and task statements (`task_eng.txt`, `task_rus.txt`).
+- `utils/` — helper libraries. Most notable is `heap_help/`, a lightweight leak detector described in `utils/heap_help/README.md`. There is also a tiny unit-test helper (`unit.*`, `unitpp.h`) that can be pulled into future tasks.
+- `allcups/` — Dockerfile and scripts used by VK autograder. `allcups/test.sh` shows how different homework numbers are built and tested, which is handy when reproducing the remote environment locally.
 
-### Local auto-tests
+### Build & run
 
-In order to run the tests the same as a remote automatic system would do (like VK All Cups) the participants can use the following commands right in their `sysprog/` folder.
-```Bash
-# Build the docker image used for running the tests in a stable isolated Linux
-# environment.
-docker build . -t allcups -f allcups/DockAllcups.dockerfile
-
-# Run tests for the second homework. One can replace N in `HW=N` with any other
-# homework number.
-docker run  -v ./:/tmp/data --env IS_LOCAL=1 --env HW=2 allcups
+```bash
+cd 2
+make              # produces ./mybash using my_solution.c + parser.c
+./mybash          # interactive shell; accepts commands via stdin
 ```
 
-The argument `HW=N` allows to specify which homework needs to be tested. The `N` must match the directory name where the solution is located. The solutions are expected to be implemented in a fork of this repository, in the same folders where the tasks and their templates are stored.
+Examples:
 
-### Remote auto-tests
-
-However the above commands are slightly different from what the remote automatic system would run. It would rather execute the following lines, right in the `sysprog/` folder as well.
-```Bash
-# Specify the number of the homework.
-echo "{\"hw\": 3}" > allcups/settings.json
-
-# The file will contain the score.
-touch allcups/output.json
-
-# The solution needs to be archived as a zip file.
-docker run -v ./:/tmp/data -v ./solutions/3.zip:/opt/client/input -v ./allcups/output.json:/opt/results/output.json allcups
+```bash
+echo "hello" | tr a-z A-Z
+cd /tmp
+pwd >> /tmp/paths.log
+exit 0
 ```
 
-The remote system uses the vanilla unchanged `sysprog/` repository to get the original tests and `Makefile`s. Then it takes your solution as an archive (can be created using `cd your_solution; zip -r ../solution.zip ./*`), builds it using the original sysprog/ Makefile from the corresponding homework, and then runs it against the original tests. The homework number is determined from the `settings.json` in the first command above. The result is saved into `output.json` and is printed to the console.
+You can also feed scripts directly: `./mybash < tests/smoke.txt`.
 
-It is highly recommended not to change your local test files and Makefiles at all. Otherwise your solution testing is going to diverge from it is running in the auto-tests system.
+### Testing workflow
+
+1. **Functional suite**:
+   ```bash
+   cd 2
+   python3 checker.py -e ./mybash --tests tests.txt
+   ```
+   Optional flags `--with_logic` / `--with_background` unlock bonus sections when the corresponding features are implemented.
+2. **Parser-only checks**: `python3 test_parser.py` validates corner cases independently from the shell runtime.
+3. **VK All Cups replica**: build the Docker image in `allcups/DockAllcups.dockerfile` and run `allcups/test.sh` with the same environment variables (`IS_LOCAL`, `HW`, etc.) that the platform uses.
+4. **Leak detection**: compile your target together with `utils/heap_help/heap_help.c` (link with `-ldl -rdynamic`) and inspect the exit-time report or query `heaph_get_alloc_count()` manually.
+
+### Known limitations
+
+- Logical connectors `&&` and `||` are parsed but currently treated like simple sequencing; the return code is still propagated from the last command.
+- Background execution via `&` is not implemented, so every pipeline is synchronous.
+- Input redirection (`<`) and stderr-specific redirection are not supported.
+- `echo` intentionally keeps to the simplest POSIX semantics (no `-n`, no escape processing).
+
+Despite these limitations, the current shell passes the base VK tests (15 points) and serves as a solid foundation for the bonus features if/when I decide to extend it further.
